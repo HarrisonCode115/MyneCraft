@@ -98,16 +98,30 @@ function generateWorld() {
 // Replace generateGrid() call with generateWorld()
 generateWorld();
 
-// Add movement state object
+// Physics and movement constants
+const GRAVITY = 0.005;
+const JUMP_FORCE = 0.15;
+const PLAYER_HEIGHT = 1.6;  // Minecraft player is ~1.8 blocks tall
+const WALK_SPEED = 0.085;
+
+// Player state
+const player = {
+    velocity: new THREE.Vector3(0, 0, 0),
+    canJump: false,
+    isJumping: false
+};
+
+// Update moveState
 const moveState = {
     forward: false,
     backward: false,
     left: false,
     right: false,
-    speed: 0.1  // Adjust this value to change movement speed
+    jump: false,
+    speed: WALK_SPEED
 };
 
-// Add keyboard event listeners
+// Update keyboard controls
 document.addEventListener('keydown', (event) => {
     switch (event.code) {
         case 'KeyW':
@@ -121,6 +135,14 @@ document.addEventListener('keydown', (event) => {
             break;
         case 'KeyD':
             moveState.right = true;
+            break;
+        case 'Space':
+            moveState.jump = true;
+            if (player.canJump) {
+                player.velocity.y = JUMP_FORCE;
+                player.canJump = false;
+                player.isJumping = true;
+            }
             break;
     }
 });
@@ -139,23 +161,51 @@ document.addEventListener('keyup', (event) => {
         case 'KeyD':
             moveState.right = false;
             break;
+        case 'Space':
+            moveState.jump = false;
+            player.isJumping = false;
+            break;
     }
 });
+
+// Add collision detection
+function checkCollision() {
+    // Simple ground collision for now
+    if (camera.position.y < PLAYER_HEIGHT) {
+        camera.position.y = PLAYER_HEIGHT;
+        player.velocity.y = 0;
+        player.canJump = true;
+        player.isJumping = false;
+    }
+    
+    // TODO: Add block collision detection here
+    
+    for(key in worldData){
+        block = worldData[key]
+        // check box of person vs box of block
+    }
+}
 
 // Update the animation loop
 function animate() {
     requestAnimationFrame(animate);
 
-    // Handle movement
+    // Apply gravity
+    if (camera.position.y > PLAYER_HEIGHT || player.velocity.y > 0) {
+        player.velocity.y -= GRAVITY;
+    }
+
+    // Update vertical position
+    camera.position.y += player.velocity.y;
+
+    // Handle horizontal movement
     const direction = new THREE.Vector3();
     
-    // Calculate movement direction based on key states
     if (moveState.forward) direction.z -= 1;
     if (moveState.backward) direction.z += 1;
     if (moveState.left) direction.x -= 1;
     if (moveState.right) direction.x += 1;
 
-    // Normalize the direction vector and apply speed
     if (direction.length() > 0) {
         direction.normalize();
         direction.multiplyScalar(moveState.speed);
@@ -163,6 +213,9 @@ function animate() {
         controls.moveRight(direction.x);
         controls.moveForward(-direction.z);
     }
+
+    // Check for collisions
+    checkCollision();
 
     renderer.render(scene, camera);
 }
