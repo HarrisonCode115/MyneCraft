@@ -22,9 +22,9 @@ document.addEventListener("click", () => {
 // Block size and map configuration
 const BLOCK_SIZE = 1;
 const MAP_SIZE = {
-    width: 16,
+    width: 50,
     height: 64,  // Typical Minecraft chunks are 16x256x16, but we'll use 64 for now
-    depth: 16
+    depth: 50
 };
 
 // Block types
@@ -43,21 +43,25 @@ function createBlock(type, x, y, z) {
     
     // Create different materials based on block type
     let material;
+    let block;
+    
     switch(type) {
         case BLOCK_TYPES.GRASS:
             material = new THREE.MeshBasicMaterial({ color: 0x3bba1f });
+            block = new THREE.Mesh(geometry, material);
             break;
         case BLOCK_TYPES.DIRT:
             material = new THREE.MeshBasicMaterial({ color: 0x8B4513 });
+            block = new THREE.Mesh(geometry, material);
             break;
         case BLOCK_TYPES.STONE:
             material = new THREE.MeshBasicMaterial({ color: 0x808080 });
+            block = new THREE.Mesh(geometry, material);
             break;
         default:
             return null;
     }
 
-    const block = new THREE.Mesh(geometry, material);
     block.position.set(x, y, z);
     return block;
 }
@@ -68,7 +72,7 @@ function generateWorld() {
         for(let z = 0; z < MAP_SIZE.depth; z++) {
             // Generate a basic height using noise 
             // const height = Math.floor(Math.random() * 3) + 1;
-            height = 1            
+            height = 2            
             for(let y = 0; y < MAP_SIZE.height; y++) {
                 let blockType = BLOCK_TYPES.AIR;
                 
@@ -99,8 +103,8 @@ function generateWorld() {
 generateWorld();
 
 // Physics and movement constants
-const GRAVITY = 0.005;
-const JUMP_FORCE = 0.15;
+const GRAVITY = 0.003;
+const JUMP_FORCE = 0.1;
 const PLAYER_HEIGHT = 1.6;  // Minecraft player is ~1.8 blocks tall
 const WALK_SPEED = 0.085;
 
@@ -179,11 +183,103 @@ function checkCollision() {
     }
     
     // TODO: Add block collision detection here
-    
-    for(key in worldData){
-        block = worldData[key]
-        // check box of person vs box of block
+    nearbyBlocks = getNearbyBlocks()    
+    for(block in nearbyBlocks){
+        // Get block position and mesh
+        const blockMesh = nearbyBlocks[block].mesh;
+        const blockPos = blockMesh.position;
+        
+        // Create bounding boxes for collision detection
+        const playerBox = new THREE.Box3().setFromObject(new THREE.Object3D());
+        playerBox.min.set(
+            camera.position.x - 0.3,  // Player width/2
+            camera.position.y - PLAYER_HEIGHT/2, // Half height
+            camera.position.z - 0.3
+        );
+        playerBox.max.set(
+            camera.position.x + 0.3,
+            camera.position.y + PLAYER_HEIGHT/2,
+            camera.position.z + 0.3
+        );
+
+        const blockBox = new THREE.Box3().setFromObject(blockMesh);
+
+        // Check for intersection
+        if (playerBox.intersectsBox(blockBox)) {
+            // Calculate overlap on each axis
+            const xOverlap = Math.min(
+                Math.abs(playerBox.max.x - blockBox.min.x),
+                Math.abs(blockBox.max.x - playerBox.min.x)
+            );
+            const yOverlap = Math.min(
+                Math.abs(playerBox.max.y - blockBox.min.y),
+                Math.abs(blockBox.max.y - playerBox.min.y)
+            );
+            const zOverlap = Math.min(
+                Math.abs(playerBox.max.z - blockBox.min.z),
+                Math.abs(blockBox.max.z - playerBox.min.z)
+            );
+
+            // Push back on axis with smallest overlap
+            if (xOverlap < yOverlap && xOverlap < zOverlap) {
+                if (camera.position.x > blockPos.x) {
+                    camera.position.x = blockBox.max.x + 0.3;
+                } else {
+                    camera.position.x = blockBox.min.x - 0.3;
+                }
+            } else if (yOverlap < xOverlap && yOverlap < zOverlap) {
+                if (camera.position.y > blockPos.y) {
+                    camera.position.y = blockBox.max.y + PLAYER_HEIGHT/2;
+                    player.velocity.y = 0;
+                    player.canJump = true;
+                } else {
+                    camera.position.y = blockBox.min.y - PLAYER_HEIGHT/2;
+                    player.velocity.y = 0;
+                }
+            } else {
+                if (camera.position.z > blockPos.z) {
+                    camera.position.z = blockBox.max.z + 0.3;
+                } else {
+                    camera.position.z = blockBox.min.z - 0.3;
+                }
+            }
+        }
     }
+}
+
+
+
+function getNearbyBlocks(){
+    // Get blocks within radius of player position
+    const radius = 2; // Default radius if none provided
+    const playerPos = camera.position;
+    const nearbyBlocks = [];
+
+    // Convert player position to block coordinates
+    const playerBlockX = Math.floor(playerPos.x);
+    const playerBlockY = Math.floor(playerPos.y);
+    const playerBlockZ = Math.floor(playerPos.z);
+
+    // Check blocks in a cube around the player
+    for (let x = playerBlockX - radius; x <= playerBlockX + radius; x++) {
+        for (let y = playerBlockY - radius; y <= playerBlockY + radius; y++) {
+            for (let z = playerBlockZ - radius; z <= playerBlockZ + radius; z++) {
+                // Skip if out of bounds
+                if (x < 0 || x >= MAP_SIZE.width || 
+                    y < 0 || y >= MAP_SIZE.height ||
+                    z < 0 || z >= MAP_SIZE.depth) {
+                    continue;
+                }
+
+                const key = `${x},${y},${z}`;
+                if (worldData[key]) {
+                    nearbyBlocks.push(worldData[key]);
+                }
+            }
+        }
+    }
+
+    return nearbyBlocks;
 }
 
 // Update the animation loop
