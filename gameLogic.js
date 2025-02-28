@@ -3,7 +3,7 @@ const scene = new THREE.Scene();
 
 // Set up the camera
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-camera.position.set(5, 2, 10); 
+camera.position.set(5, 1.8, 10); 
 
 // Set up the WebGL renderer
 const renderer = new THREE.WebGLRenderer();
@@ -43,20 +43,45 @@ function createBlock(type, x, y, z) {
     
     // Create different materials based on block type
     let material;
-    let block;
+        let block;
     
     switch(type) {
         case BLOCK_TYPES.GRASS:
             material = new THREE.MeshBasicMaterial({ color: 0x3bba1f });
             block = new THREE.Mesh(geometry, material);
+            
+            // Add outline to grass blocks
+            const edges = new THREE.EdgesGeometry(geometry);
+            const line = new THREE.LineSegments(
+                edges,
+                
+                new THREE.LineBasicMaterial({ color: 0x000000 })
+            );
+            block.add(line);
             break;
         case BLOCK_TYPES.DIRT:
             material = new THREE.MeshBasicMaterial({ color: 0x8B4513 });
             block = new THREE.Mesh(geometry, material);
+            
+            // Add outline to dirt blocks
+            const dirtEdges = new THREE.EdgesGeometry(geometry);
+            const dirtLine = new THREE.LineSegments(
+                dirtEdges,
+                new THREE.LineBasicMaterial({ color: 0x000000 })
+            );
+            block.add(dirtLine);
             break;
         case BLOCK_TYPES.STONE:
             material = new THREE.MeshBasicMaterial({ color: 0x808080 });
             block = new THREE.Mesh(geometry, material);
+            
+            // Add outline to stone blocks
+            const stoneEdges = new THREE.EdgesGeometry(geometry);
+            const stoneLine = new THREE.LineSegments(
+                stoneEdges,
+                new THREE.LineBasicMaterial({ color: 0x000000 })
+            );
+            block.add(stoneLine);
             break;
         default:
             return null;
@@ -105,7 +130,7 @@ generateWorld();
 // Physics and movement constants
 const GRAVITY = 0.003;
 const JUMP_FORCE = 0.1;
-const PLAYER_HEIGHT = 1.6;  // Minecraft player is ~1.8 blocks tall
+const PLAYER_HEIGHT = 1.8;  // Minecraft player is ~1.8 blocks tall
 const WALK_SPEED = 0.085;
 
 // Player state
@@ -124,6 +149,9 @@ const moveState = {
     jump: false,
     speed: WALK_SPEED
 };
+
+// Set initial camera position
+camera.position.set(5, PLAYER_HEIGHT, 10);
 
 // Update keyboard controls
 document.addEventListener('keydown', (event) => {
@@ -175,12 +203,12 @@ document.addEventListener('keyup', (event) => {
 // Add collision detection
 function checkCollision() {
     // Simple ground collision for now
-    if (camera.position.y < PLAYER_HEIGHT) {
-        camera.position.y = PLAYER_HEIGHT;
-        player.velocity.y = 0;
-        player.canJump = true;
-        player.isJumping = false;
-    }
+    // if (camera.position.y < PLAYER_HEIGHT) {
+    //     camera.position.y = PLAYER_HEIGHT;
+    //     player.velocity.y = 0;
+    //     player.canJump = true;
+    //     player.isJumping = false;
+    // }
     
     // TODO: Add block collision detection here
     nearbyBlocks = getNearbyBlocks()    
@@ -193,12 +221,12 @@ function checkCollision() {
         const playerBox = new THREE.Box3().setFromObject(new THREE.Object3D());
         playerBox.min.set(
             camera.position.x - 0.3,  // Player width/2
-            camera.position.y - PLAYER_HEIGHT/2, // Half height
+            camera.position.y - PLAYER_HEIGHT,  // Full height from feet
             camera.position.z - 0.3
         );
         playerBox.max.set(
             camera.position.x + 0.3,
-            camera.position.y + PLAYER_HEIGHT/2,
+            camera.position.y,  // Camera position is at eye level
             camera.position.z + 0.3
         );
 
@@ -229,11 +257,11 @@ function checkCollision() {
                 }
             } else if (yOverlap < xOverlap && yOverlap < zOverlap) {
                 if (camera.position.y > blockPos.y) {
-                    camera.position.y = blockBox.max.y + PLAYER_HEIGHT/2;
+                    camera.position.y = blockBox.max.y + PLAYER_HEIGHT;
                     player.velocity.y = 0;
                     player.canJump = true;
                 } else {
-                    camera.position.y = blockBox.min.y - PLAYER_HEIGHT/2;
+                    camera.position.y = blockBox.min.y - PLAYER_HEIGHT;
                     player.velocity.y = 0;
                 }
             } else {
@@ -316,3 +344,35 @@ function animate() {
     renderer.render(scene, camera);
 }
 animate();
+
+// Add raycaster setup after the controls setup
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+
+// Add click handler for breaking blocks
+document.addEventListener('mousedown', (event) => {
+    if (!controls.isLocked) return; // Only break blocks when in pointer lock
+
+    // Update the picking ray with the camera and mouse position
+    raycaster.setFromCamera(mouse, camera);
+
+    // Get all nearby blocks for intersection testing
+    const nearbyBlocks = getNearbyBlocks();
+    const blockMeshes = nearbyBlocks.map(block => block.mesh);
+    
+    // Calculate intersections with blocks
+    const intersects = raycaster.intersectObjects(blockMeshes);
+
+    if (intersects.length > 0) {
+        // Get the first (closest) intersected block
+        const intersectedMesh = intersects[0].object;
+        
+        // Find the block data using the mesh position
+        const pos = intersectedMesh.position;
+        const key = `${pos.x},${pos.y},${pos.z}`;
+        
+        // Remove the block from the scene and world data
+        scene.remove(worldData[key].mesh);
+        delete worldData[key];
+    }
+});
