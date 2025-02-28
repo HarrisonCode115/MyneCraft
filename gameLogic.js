@@ -211,7 +211,7 @@ function checkCollision() {
     // }
     
     // TODO: Add block collision detection here
-    nearbyBlocks = getNearbyBlocks()    
+    nearbyBlocks = getNearbyBlocks(2)    
     for(block in nearbyBlocks){
         // Get block position and mesh
         const blockMesh = nearbyBlocks[block].mesh;
@@ -277,9 +277,9 @@ function checkCollision() {
 
 
 
-function getNearbyBlocks(){
+function getNearbyBlocks(rad){
     // Get blocks within radius of player position
-    const radius = 2; // Default radius if none provided
+    const radius = rad; // Default radius if none provided
     const playerPos = camera.position;
     const nearbyBlocks = [];
 
@@ -351,13 +351,16 @@ const mouse = new THREE.Vector2();
 
 // Add click handler for breaking blocks
 document.addEventListener('mousedown', (event) => {
+    // Check if it's the left mouse button (button 0)
+    if (event.button !== 0) return;
+    
     if (!controls.isLocked) return; // Only break blocks when in pointer lock
 
     // Update the picking ray with the camera and mouse position
     raycaster.setFromCamera(mouse, camera);
 
     // Get all nearby blocks for intersection testing
-    const nearbyBlocks = getNearbyBlocks();
+    const nearbyBlocks = getNearbyBlocks(3);
     const blockMeshes = nearbyBlocks.map(block => block.mesh);
     
     // Calculate intersections with blocks

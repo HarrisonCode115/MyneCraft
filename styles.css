@@ -1,0 +1,32 @@
+body {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;  /* Prevents scrolling */
+    width: 100vw;
+    height: 100vh;
+    background-color: black; /* Added to prevent any white background */
+}
+
+canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+    position: absolute; /* Position the canvas absolutely */
+    top: 0;
+    left: 0;
+}
+
+#crosshair {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: white;
+    font-size: 32px;  /* Increased size */
+    font-weight: bold;  /* Make it bolder */
+    font-family: Arial, sans-serif;
+    pointer-events: none; /* Makes sure it doesn't interfere with clicking */
+    user-select: none;   /* Prevents text selection */
+    z-index: 1000;      /* Ensures it's above the game canvas */
+    text-shadow: 2px 2px 2px rgba(0,0,0,0.5);  /* Add shadow for better visibility */
+} 
