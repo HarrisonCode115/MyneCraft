@@ -202,15 +202,6 @@ document.addEventListener('keyup', (event) => {
 
 // Add collision detection
 function checkCollision() {
-    // Simple ground collision for now
-    // if (camera.position.y < PLAYER_HEIGHT) {
-    //     camera.position.y = PLAYER_HEIGHT;
-    //     player.velocity.y = 0;
-    //     player.canJump = true;
-    //     player.isJumping = false;
-    // }
-    
-    // TODO: Add block collision detection here
     nearbyBlocks = getNearbyBlocks(2)    
     for(block in nearbyBlocks){
         // Get block position and mesh
@@ -351,10 +342,7 @@ const mouse = new THREE.Vector2();
 
 // Add click handler for breaking blocks
 document.addEventListener('mousedown', (event) => {
-    // Check if it's the left mouse button (button 0)
-    if (event.button !== 0) return;
-    
-    if (!controls.isLocked) return; // Only break blocks when in pointer lock
+    if (!controls.isLocked) return; // Only interact with blocks when in pointer lock
 
     // Update the picking ray with the camera and mouse position
     raycaster.setFromCamera(mouse, camera);
@@ -367,15 +355,63 @@ document.addEventListener('mousedown', (event) => {
     const intersects = raycaster.intersectObjects(blockMeshes);
 
     if (intersects.length > 0) {
-        // Get the first (closest) intersected block
         const intersectedMesh = intersects[0].object;
-        
-        // Find the block data using the mesh position
         const pos = intersectedMesh.position;
         const key = `${pos.x},${pos.y},${pos.z}`;
         
-        // Remove the block from the scene and world data
-        scene.remove(worldData[key].mesh);
-        delete worldData[key];
+        if (event.button === 0) {  // Left click - break block
+            // Remove the block from the scene and world data
+            scene.remove(worldData[key].mesh);
+            delete worldData[key];
+        } else if (event.button === 2) {  // Right click - place block
+            // Calculate the position for the new block based on intersection point
+            const normal = intersects[0].face.normal;
+            const newX = pos.x + normal.x;
+            const newY = pos.y + normal.y;
+            const newZ = pos.z + normal.z;
+            
+        
+
+            // Create bounding boxes for collision detection so we dont place the block where player
+                const playerBox = new THREE.Box3().setFromObject(new THREE.Object3D());
+                playerBox.min.set(
+                    camera.position.x - 0.3,  // Player width/2
+                    camera.position.y - PLAYER_HEIGHT,  // Full height from feet
+                    camera.position.z - 0.3
+                );
+                playerBox.max.set(
+                    camera.position.x + 0.3,
+                    camera.position.y,  // Camera position is at eye level
+                    camera.position.z + 0.3
+                );
+            // Check if position is valid (within bounds and not occupied)
+            if (newX >= 0 && newX < MAP_SIZE.width &&
+                newY >= 0 && newY < MAP_SIZE.height &&
+                newZ >= 0 && newZ < MAP_SIZE.depth){
+                
+                const newKey = `${newX},${newY},${newZ}`;
+                if (!worldData[newKey]) {
+                    // Create new block (using dirt for now)
+                    const newBlock = createBlock(BLOCK_TYPES.DIRT, newX, newY, newZ);
+                    if (newBlock) {
+                        const blockBox = new THREE.Box3().setFromObject(newBlock);
+                        if(!playerBox.intersectsBox(blockBox)){
+                            scene.add(newBlock);
+                            worldData[newKey] = {
+                                type: BLOCK_TYPES.DIRT,
+                                mesh: newBlock
+                            };
+                        }
+                        
+                    }
+                }
+            }
+        }
     }
 });
+
+// Prevent context menu from showing on right click
+document.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+});
+
