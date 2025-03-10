@@ -331,7 +331,14 @@ function unloadChunk(chunkX, chunkZ, chunk) {
         if(block.mesh) {
             scene.remove(block.mesh);
             block.mesh.geometry.dispose();
-            block.mesh.material.dispose();
+            
+            // Handle both single materials and material arrays
+            if (Array.isArray(block.mesh.material)) {
+                block.mesh.material.forEach(material => material.dispose());
+            } else {
+                block.mesh.material.dispose();
+            }
+            
             block.mesh = null;
         }
     }
@@ -342,7 +349,7 @@ function unloadChunk(chunkX, chunkZ, chunk) {
 function getNearbyBlocks(rad) {
     const playerPos = camera.position;
     const nearbyBlocks = [];
-    
+
     const minX = Math.floor(playerPos.x - rad);
     const maxX = Math.floor(playerPos.x + rad);
     const minY = Math.floor(playerPos.y - rad);
@@ -365,7 +372,7 @@ function getNearbyBlocks(rad) {
             }
         }
     }
-    
+
     return nearbyBlocks;
 }
 
@@ -540,15 +547,28 @@ document.addEventListener('contextmenu', (event) => {
 // Cache geometry and materials
 const blockGeometry = new THREE.BoxGeometry(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
 const blockMaterials = {
-    [BLOCK_TYPES.GRASS]: new THREE.MeshBasicMaterial({ color: 0x3bba1f }),
+    [BLOCK_TYPES.GRASS]: [
+        new THREE.MeshBasicMaterial({ color: 0x8B4513 }), // Right
+        new THREE.MeshBasicMaterial({ color: 0x8B4513 }), // Left
+        new THREE.MeshBasicMaterial({ color: 0x3bba1f }), // Top
+        new THREE.MeshBasicMaterial({ color: 0x8B4513 }), // Bottom
+        new THREE.MeshBasicMaterial({ color: 0x8B4513 }), // Front
+        new THREE.MeshBasicMaterial({ color: 0x8B4513 })  // Back
+    ],
     [BLOCK_TYPES.DIRT]: new THREE.MeshBasicMaterial({ color: 0x8B4513 }),
     [BLOCK_TYPES.STONE]: new THREE.MeshBasicMaterial({ color: 0x808080 })
 };
 
-// Update createBlock to use cached geometry and materials
+// Update createBlock to handle arrays of materials
 function createBlock(type, x, y, z) {
     if (!blockMaterials[type]) return null;
-    const block = new THREE.Mesh(blockGeometry, blockMaterials[type]);
+    
+    // If the material is an array, use it directly, otherwise create an array of 6 identical materials
+    const materials = Array.isArray(blockMaterials[type]) 
+        ? blockMaterials[type] 
+        : Array(6).fill(blockMaterials[type]);
+    
+    const block = new THREE.Mesh(blockGeometry, materials);
     block.position.set(x, y, z);
     return block;
 }
