@@ -1,5 +1,7 @@
 // Create the Three.js scene
 const scene = new THREE.Scene();
+// Set the background color to sky blue
+scene.background = new THREE.Color(0x87CEEB); // Sky blue color
 
 // Set up the camera
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -9,7 +11,6 @@ camera.position.set(5, 1.8, 10);
 const renderer = new THREE.WebGLRenderer();
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
-
 
 // Pointer lock controls (for first-person movement)
 const controls = new THREE.PointerLockControls(camera, document.body);
@@ -35,78 +36,21 @@ const BLOCK_TYPES = {
     STONE: 3
 };
 
+
+// Physics and movement constants
+const GRAVITY = 0.005;
+const JUMP_FORCE = 0.1;
+const PLAYER_HEIGHT = 1.8;
+const WALK_SPEED = 0.085; // Increased to feel right with delta time
+const SPRINT_SPEED = 0.15; // Increased to feel right with delta time
+
 // 3D array to store world data
 const worldData = {};
 
-function createBlock(type, x, y, z) {
-    const geometry = new THREE.BoxGeometry(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
-    
-    let material;
-    let block;
-    
-    switch(type) {
-        case BLOCK_TYPES.GRASS:
-            material = new THREE.MeshBasicMaterial({ color: 0x3bba1f });
-            block = new THREE.Mesh(geometry, material);
-            break;
-        case BLOCK_TYPES.DIRT:
-            material = new THREE.MeshBasicMaterial({ color: 0x8B4513 });
-            block = new THREE.Mesh(geometry, material);
-            break;
-        case BLOCK_TYPES.STONE:
-            material = new THREE.MeshBasicMaterial({ color: 0x808080 });
-            block = new THREE.Mesh(geometry, material);
-            break;
-        default:
-            return null;
-    }
-
-    block.position.set(x, y, z);
-    return block;
-}
-
-function generateWorld() {
-    // Simple terrain generation
-    for(let x = 0; x < MAP_SIZE.width; x++) {
-        for(let z = 0; z < MAP_SIZE.depth; z++) {
-            // Generate a basic height using noise 
-            // const height = Math.floor(Math.random() * 3) + 1;
-            height = 2            
-            for(let y = 0; y < MAP_SIZE.height; y++) {
-                let blockType = BLOCK_TYPES.AIR;
-                
-                if (y < height - 1) {
-                    blockType = BLOCK_TYPES.DIRT;
-                } else if (y === height - 1) {
-                    blockType = BLOCK_TYPES.GRASS;
-                }
-                
-                if (blockType !== BLOCK_TYPES.AIR) {
-                    const block = createBlock(blockType, x, y, z);
-                    if (block) {
-                        scene.add(block);
-                        // Store block in world data
-                        const key = `${x},${y},${z}`;
-                        worldData[key] = {
-                            type: blockType,
-                            mesh: block
-                        };
-                    }
-                }
-            }
-        }
-    }
-}
-
-// Replace generateGrid() call with generateWorld()
-generateWorld();
-
-// Physics and movement constants
-const GRAVITY = 0.003;
-const JUMP_FORCE = 0.1;
-const PLAYER_HEIGHT = 1.8;  // Minecraft player is ~1.8 blocks tall
-const WALK_SPEED = 0.030;
-const SPRINT_SPEED
+// Add these constants for terrain generation
+const NOISE_SCALE = 25;
+const TERRAIN_AMPLITUDE = 8;
+const BASE_HEIGHT = 5;
 
 // Player state
 const player = {
@@ -124,9 +68,6 @@ const moveState = {
     jump: false,
     speed: WALK_SPEED
 };
-
-// Set initial camera position
-camera.position.set(5, PLAYER_HEIGHT, 10);
 
 // Update keyboard controls
 document.addEventListener('keydown', (event) => {
@@ -241,30 +182,23 @@ function checkCollision() {
     }
 }
 
-
-
-function getNearbyBlocks(rad){
-    // Get blocks within radius of player position
-    const radius = rad; // Default radius if none provided
+// Modify getNearbyBlocks to use chunks
+function getNearbyBlocks(rad) {
     const playerPos = camera.position;
     const nearbyBlocks = [];
+    
+    // Calculate block coordinates
+    const minX = Math.floor(playerPos.x - rad);
+    const maxX = Math.floor(playerPos.x + rad);
+    const minY = Math.floor(playerPos.y - rad);
+    const maxY = Math.floor(playerPos.y + rad);
+    const minZ = Math.floor(playerPos.z - rad);
+    const maxZ = Math.floor(playerPos.z + rad);
 
-    // Convert player position to block coordinates
-    const playerBlockX = Math.floor(playerPos.x);
-    const playerBlockY = Math.floor(playerPos.y);
-    const playerBlockZ = Math.floor(playerPos.z);
-
-    // Check blocks in a cube around the player
-    for (let x = playerBlockX - radius; x <= playerBlockX + radius; x++) {
-        for (let y = playerBlockY - radius; y <= playerBlockY + radius; y++) {
-            for (let z = playerBlockZ - radius; z <= playerBlockZ + radius; z++) {
-                // Skip if out of bounds
-                if (x < 0 || x >= MAP_SIZE.width || 
-                    y < 0 || y >= MAP_SIZE.height ||
-                    z < 0 || z >= MAP_SIZE.depth) {
-                    continue;
-                }
-
+    // Only check blocks within the calculated bounds
+    for (let x = minX; x <= maxX; x++) {
+        for (let y = minY; y <= maxY; y++) {
+            for (let z = minZ; z <= maxZ; z++) {
                 const key = `${x},${y},${z}`;
                 if (worldData[key]) {
                     nearbyBlocks.push(worldData[key]);
@@ -272,7 +206,7 @@ function getNearbyBlocks(rad){
             }
         }
     }
-
+    
     return nearbyBlocks;
 }
 
@@ -314,17 +248,23 @@ function updateBlockHighlight() {
     }
 }
 
+// Add these variables at the top with other constants
+const clock = new THREE.Clock(); // Add this near other THREE.js initializations
+
 // Update the animation loop
 function animate() {
     requestAnimationFrame(animate);
+    
+    // Get delta time (in seconds) - only call this once
+    const deltaTime = clock.getDelta();
 
     // Apply gravity
     if (camera.position.y > PLAYER_HEIGHT || player.velocity.y > 0) {
-        player.velocity.y -= GRAVITY;
+        player.velocity.y -= GRAVITY * deltaTime * 60;
     }
 
     // Update vertical position
-    camera.position.y += player.velocity.y;
+    camera.position.y += player.velocity.y * deltaTime * 60;
 
     // Handle horizontal movement
     const direction = new THREE.Vector3();
@@ -336,18 +276,14 @@ function animate() {
 
     if (direction.length() > 0) {
         direction.normalize();
-        direction.multiplyScalar(moveState.speed);
+        direction.multiplyScalar(moveState.speed * deltaTime * 60);
         
         controls.moveRight(direction.x);
         controls.moveForward(-direction.z);
     }
 
-    // Check for collisions
     checkCollision();
-
-    // Add this line before renderer.render
     updateBlockHighlight();
-
     renderer.render(scene, camera);
 }
 animate();
@@ -364,7 +300,7 @@ document.addEventListener('mousedown', (event) => {
     raycaster.setFromCamera(mouse, camera);
 
     // Get all nearby blocks for intersection testing
-    const nearbyBlocks = getNearbyBlocks(3);
+    const nearbyBlocks = getNearbyBlocks(4);
     const blockMeshes = nearbyBlocks.map(block => block.mesh);
     
     // Calculate intersections with blocks
@@ -430,4 +366,91 @@ document.addEventListener('mousedown', (event) => {
 document.addEventListener('contextmenu', (event) => {
     event.preventDefault();
 });
+
+function createBlock(type, x, y, z) {
+    const geometry = new THREE.BoxGeometry(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+    
+    let material;
+    let block;
+    
+    switch(type) {
+        case BLOCK_TYPES.GRASS:
+            material = new THREE.MeshBasicMaterial({ color: 0x3bba1f });
+            block = new THREE.Mesh(geometry, material);
+            break;
+        case BLOCK_TYPES.DIRT:
+            material = new THREE.MeshBasicMaterial({ color: 0x8B4513 });
+            block = new THREE.Mesh(geometry, material);
+            break;
+        case BLOCK_TYPES.STONE:
+            material = new THREE.MeshBasicMaterial({ color: 0x808080 });
+            block = new THREE.Mesh(geometry, material);
+            break;
+        default:
+            return null;
+    }
+
+    block.position.set(x, y, z);
+    return block;
+}
+
+// Add this function to find the surface height at a given x,z coordinate
+function getSurfaceHeight(x, z) {
+    for (let y = MAP_SIZE.height - 1; y >= 0; y--) {
+        const key = `${x},${y},${z}`;
+        if (worldData[key]) {
+            return y + 1; // Return one block above the surface
+        }
+    }
+    return BASE_HEIGHT; // Fallback height if no surface found
+}
+
+// Modify the world generation to set player spawn after world is generated
+function generateWorld() {
+    const noise = new SimplexNoise();
+    
+    // Generate terrain
+    for(let x = 0; x < MAP_SIZE.width; x++) {
+        for(let z = 0; z < MAP_SIZE.depth; z++) {
+            const nx = x / NOISE_SCALE;
+            const nz = z / NOISE_SCALE;
+            const height = Math.floor(
+                BASE_HEIGHT + 
+                (noise.noise2D(nx, nz) + 1) * 0.5 * TERRAIN_AMPLITUDE
+            );
+            
+            for(let y = 0; y < height; y++) {
+                let blockType;
+                if (y < height - 4) {
+                    blockType = BLOCK_TYPES.STONE;
+                } else if (y < height - 1) {
+                    blockType = BLOCK_TYPES.DIRT;
+                } else if (y === height - 1) {
+                    blockType = BLOCK_TYPES.GRASS;
+                }
+                
+                if (blockType) {
+                    const block = createBlock(blockType, x, y, z);
+                    if (block) {
+                        scene.add(block);
+                        const key = `${x},${y},${z}`;
+                        worldData[key] = {
+                            type: blockType,
+                            mesh: block
+                        };
+                    }
+                }
+            }
+        }
+    }
+
+    // Set player spawn position
+    const spawnX = Math.floor(MAP_SIZE.width / 2);
+    const spawnZ = Math.floor(MAP_SIZE.depth / 2);
+    const spawnY = getSurfaceHeight(spawnX, spawnZ);
+    camera.position.set(spawnX, spawnY + PLAYER_HEIGHT, spawnZ);
+}
+
+// Initialize the world
+generateWorld();
 
