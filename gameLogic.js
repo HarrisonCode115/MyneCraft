@@ -182,12 +182,167 @@ function checkCollision() {
     }
 }
 
-// Modify getNearbyBlocks to use chunks
+// Add these constants near the top
+const CHUNK_SIZE = 16;
+const CHUNKS = {};
+const RENDER_DISTANCE = 32;
+const loadedChunks = new Set();  // Move this to the top
+
+// Add chunk helper functions
+function getChunkKey(chunkX, chunkZ) {
+    return `${chunkX},${chunkZ}`;
+}
+
+function getChunkCoords(x, z) {
+    return {
+        chunkX: Math.floor(x / CHUNK_SIZE),
+        chunkZ: Math.floor(z / CHUNK_SIZE),
+        localX: Math.floor(x % CHUNK_SIZE),
+        localZ: Math.floor(z % CHUNK_SIZE)
+    };
+}
+
+// Update generateWorld to use chunks
+function generateWorld() {
+    const noise = new SimplexNoise();
+    
+    // Calculate number of chunks needed
+    const chunksX = Math.ceil(MAP_SIZE.width / CHUNK_SIZE);
+    const chunksZ = Math.ceil(MAP_SIZE.depth / CHUNK_SIZE);
+    
+    // Generate chunks
+    for(let cx = 0; cx < chunksX; cx++) {
+        for(let cz = 0; cz < chunksZ; cz++) {
+            generateChunk(cx, cz, noise);
+        }
+    }
+
+    // Set player spawn position
+    const spawnX = Math.floor(MAP_SIZE.width / 2);
+    const spawnZ = Math.floor(MAP_SIZE.depth / 2);
+    const spawnY = getSurfaceHeight(spawnX, spawnZ);
+    camera.position.set(spawnX, spawnY + PLAYER_HEIGHT, spawnZ);
+}
+
+function generateChunk(chunkX, chunkZ, noise) {
+    const chunk = {
+        blocks: {},
+        loaded: false
+    };
+    
+    // Generate terrain for this chunk
+    for(let lx = 0; lx < CHUNK_SIZE; lx++) {
+        for(let lz = 0; lz < CHUNK_SIZE; lz++) {
+            const worldX = chunkX * CHUNK_SIZE + lx;
+            const worldZ = chunkZ * CHUNK_SIZE + lz;
+            
+            if(worldX >= MAP_SIZE.width || worldZ >= MAP_SIZE.depth) continue;
+
+            const nx = worldX / NOISE_SCALE;
+            const nz = worldZ / NOISE_SCALE;
+            const height = Math.floor(
+                BASE_HEIGHT + 
+                (noise.noise2D(nx, nz) + 1) * 0.5 * TERRAIN_AMPLITUDE
+            );
+            
+            for(let y = 0; y < height; y++) {
+                let blockType;
+                if (y < height - 4) {
+                    blockType = BLOCK_TYPES.STONE;
+                } else if (y < height - 1) {
+                    blockType = BLOCK_TYPES.DIRT;
+                } else if (y === height - 1) {
+                    blockType = BLOCK_TYPES.GRASS;
+                }
+                
+                if (blockType) {
+                    const key = `${lx},${y},${lz}`;
+                    chunk.blocks[key] = {
+                        type: blockType,
+                        worldX: worldX,
+                        worldY: y,
+                        worldZ: worldZ
+                    };
+                }
+            }
+        }
+    }
+    
+    CHUNKS[getChunkKey(chunkX, chunkZ)] = chunk;
+}
+
+// Update visibility based on chunks
+function updateVisibility() {
+    const playerPos = camera.position;
+    const { chunkX: playerChunkX, chunkZ: playerChunkZ } = getChunkCoords(playerPos.x, playerPos.z);
+    
+    const renderChunks = Math.ceil(RENDER_DISTANCE / CHUNK_SIZE);
+    
+    // Load chunks in range
+    for (let dx = -renderChunks; dx <= renderChunks; dx++) {
+        for (let dz = -renderChunks; dz <= renderChunks; dz++) {
+            const cx = playerChunkX + dx;
+            const cz = playerChunkZ + dz;
+            const chunkKey = getChunkKey(cx, cz);
+            
+            if (dx * dx + dz * dz <= renderChunks * renderChunks) {
+                const chunk = CHUNKS[chunkKey];
+                if (chunk && !chunk.loaded) {
+                    loadChunk(cx, cz, chunk);
+                    loadedChunks.add(chunkKey);
+                }
+            }
+        }
+    }
+    
+    // Unload distant chunks
+    for (const chunkKey of Array.from(loadedChunks)) {
+        const [cx, cz] = chunkKey.split(',').map(Number);
+        const dx = cx - playerChunkX;
+        const dz = cz - playerChunkZ;
+        
+        if (dx * dx + dz * dz > renderChunks * renderChunks) {
+            const chunk = CHUNKS[chunkKey];
+            if (chunk && chunk.loaded) {
+                unloadChunk(cx, cz, chunk);
+                loadedChunks.delete(chunkKey);
+            }
+        }
+    }
+}
+
+function loadChunk(chunkX, chunkZ, chunk) {
+    for(const blockKey in chunk.blocks) {
+        const block = chunk.blocks[blockKey];
+        if(!block.mesh) {
+            const mesh = createBlock(block.type, block.worldX, block.worldY, block.worldZ);
+            if(mesh) {
+                scene.add(mesh);
+                block.mesh = mesh;
+            }
+        }
+    }
+    chunk.loaded = true;
+}
+
+function unloadChunk(chunkX, chunkZ, chunk) {
+    for(const blockKey in chunk.blocks) {
+        const block = chunk.blocks[blockKey];
+        if(block.mesh) {
+            scene.remove(block.mesh);
+            block.mesh.geometry.dispose();
+            block.mesh.material.dispose();
+            block.mesh = null;
+        }
+    }
+    chunk.loaded = false;
+}
+
+// Update getNearbyBlocks to work with chunks
 function getNearbyBlocks(rad) {
     const playerPos = camera.position;
     const nearbyBlocks = [];
     
-    // Calculate block coordinates
     const minX = Math.floor(playerPos.x - rad);
     const maxX = Math.floor(playerPos.x + rad);
     const minY = Math.floor(playerPos.y - rad);
@@ -195,13 +350,17 @@ function getNearbyBlocks(rad) {
     const minZ = Math.floor(playerPos.z - rad);
     const maxZ = Math.floor(playerPos.z + rad);
 
-    // Only check blocks within the calculated bounds
-    for (let x = minX; x <= maxX; x++) {
-        for (let y = minY; y <= maxY; y++) {
-            for (let z = minZ; z <= maxZ; z++) {
-                const key = `${x},${y},${z}`;
-                if (worldData[key]) {
-                    nearbyBlocks.push(worldData[key]);
+    for(let x = minX; x <= maxX; x++) {
+        for(let y = minY; y <= maxY; y++) {
+            for(let z = minZ; z <= maxZ; z++) {
+                const { chunkX, chunkZ, localX, localZ } = getChunkCoords(x, z);
+                const chunk = CHUNKS[getChunkKey(chunkX, chunkZ)];
+                
+                if(chunk && chunk.loaded) {
+                    const block = chunk.blocks[`${localX},${y},${localZ}`];
+                    if(block && block.mesh) {
+                        nearbyBlocks.push({ mesh: block.mesh });
+                    }
                 }
             }
         }
@@ -282,6 +441,7 @@ function animate() {
         controls.moveForward(-direction.z);
     }
 
+    updateVisibility();
     checkCollision();
     updateBlockHighlight();
     renderer.render(scene, camera);
@@ -292,69 +452,79 @@ animate();
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 
+// Add this helper function to check if a position would intersect with the player
+function wouldIntersectPlayer(x, y, z) {
+    const playerBox = new THREE.Box3();
+    playerBox.min.set(
+        camera.position.x - 0.2,  // Reduced from 0.3
+        camera.position.y - PLAYER_HEIGHT + 0.1,  // Added small offset from bottom
+        camera.position.z - 0.2   // Reduced from 0.3
+    );
+    playerBox.max.set(
+        camera.position.x + 0.2,  // Reduced from 0.3
+        camera.position.y - 0.1,  // Added small offset from top
+        camera.position.z + 0.2   // Reduced from 0.3
+    );
+
+    const blockBox = new THREE.Box3();
+    blockBox.min.set(x - 0.5, y - 0.5, z - 0.5);
+    blockBox.max.set(x + 0.5, y + 0.5, z + 0.5);
+
+    return playerBox.intersectsBox(blockBox);
+}
+
 // Add click handler for breaking blocks
 document.addEventListener('mousedown', (event) => {
-    if (!controls.isLocked) return; // Only interact with blocks when in pointer lock
+    if (!controls.isLocked) return;
 
-    // Update the picking ray with the camera and mouse position
     raycaster.setFromCamera(mouse, camera);
-
-    // Get all nearby blocks for intersection testing
     const nearbyBlocks = getNearbyBlocks(4);
     const blockMeshes = nearbyBlocks.map(block => block.mesh);
-    
-    // Calculate intersections with blocks
     const intersects = raycaster.intersectObjects(blockMeshes);
 
     if (intersects.length > 0) {
         const intersectedMesh = intersects[0].object;
         const pos = intersectedMesh.position;
-        const key = `${pos.x},${pos.y},${pos.z}`;
+        
+        // Get chunk coordinates for the block
+        const { chunkX, chunkZ, localX, localZ } = getChunkCoords(pos.x, pos.z);
+        const chunk = CHUNKS[getChunkKey(chunkX, chunkZ)];
         
         if (event.button === 0) {  // Left click - break block
-            // Remove the block from the scene and world data
-            scene.remove(worldData[key].mesh);
-            delete worldData[key];
+            if (chunk && chunk.loaded) {
+                const key = `${localX},${Math.floor(pos.y)},${localZ}`;
+                if (chunk.blocks[key]) {
+                    scene.remove(chunk.blocks[key].mesh);
+                    delete chunk.blocks[key];
+                }
+            }
         } else if (event.button === 2) {  // Right click - place block
-            // Calculate the position for the new block based on intersection point
             const normal = intersects[0].face.normal;
             const newX = pos.x + normal.x;
             const newY = pos.y + normal.y;
             const newZ = pos.z + normal.z;
             
-        
-
-            // Create bounding boxes for collision detection so we dont place the block where player
-                const playerBox = new THREE.Box3().setFromObject(new THREE.Object3D());
-                playerBox.min.set(
-                    camera.position.x - 0.2,  // Reduced from 0.3
-                    camera.position.y - PLAYER_HEIGHT + 0.1,  // Added small offset from bottom
-                    camera.position.z - 0.2   // Reduced from 0.3
-                );
-                playerBox.max.set(
-                    camera.position.x + 0.2,  // Reduced from 0.3
-                    camera.position.y - 0.1,  // Added small offset from top
-                    camera.position.z + 0.2   // Reduced from 0.3
-                );
-            // Check if position is valid (within bounds and not occupied)
-            if (newX >= 0 && newX < MAP_SIZE.width &&
-                newY >= 0 && newY < MAP_SIZE.height &&
-                newZ >= 0 && newZ < MAP_SIZE.depth){
+            // Check if the new block would intersect with the player
+            if (!wouldIntersectPlayer(newX, newY, newZ)) {
+                const { chunkX: newChunkX, chunkZ: newChunkZ, localX: newLocalX, localZ: newLocalZ } = getChunkCoords(newX, newZ);
+                const newChunk = CHUNKS[getChunkKey(newChunkX, newChunkZ)];
                 
-                const newKey = `${newX},${newY},${newZ}`;
-                if (!worldData[newKey]) {
-                    // Create new block (using dirt for now)
-                    const newBlock = createBlock(BLOCK_TYPES.DIRT, newX, newY, newZ);
-                    if (newBlock) {
-                        const blockBox = new THREE.Box3().setFromObject(newBlock);
-                        if(!playerBox.intersectsBox(blockBox)){
-                            scene.add(newBlock);
-                            worldData[newKey] = {
-                                type: BLOCK_TYPES.DIRT,
-                                mesh: newBlock
-                            };
-                        }
+                if (newChunk && newChunk.loaded) {
+                    const newKey = `${newLocalX},${Math.floor(newY)},${newLocalZ}`;
+                    if (!newChunk.blocks[newKey]) {
+                        const block = {
+                            type: BLOCK_TYPES.DIRT,
+                            worldX: newX,
+                            worldY: Math.floor(newY),
+                            worldZ: newZ
+                        };
                         
+                        const mesh = createBlock(block.type, block.worldX, block.worldY, block.worldZ);
+                        if (mesh) {
+                            scene.add(mesh);
+                            block.mesh = mesh;
+                            newChunk.blocks[newKey] = block;
+                        }
                     }
                 }
             }
@@ -367,89 +537,39 @@ document.addEventListener('contextmenu', (event) => {
     event.preventDefault();
 });
 
-function createBlock(type, x, y, z) {
-    const geometry = new THREE.BoxGeometry(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
-    
-    let material;
-    let block;
-    
-    switch(type) {
-        case BLOCK_TYPES.GRASS:
-            material = new THREE.MeshBasicMaterial({ color: 0x3bba1f });
-            block = new THREE.Mesh(geometry, material);
-            break;
-        case BLOCK_TYPES.DIRT:
-            material = new THREE.MeshBasicMaterial({ color: 0x8B4513 });
-            block = new THREE.Mesh(geometry, material);
-            break;
-        case BLOCK_TYPES.STONE:
-            material = new THREE.MeshBasicMaterial({ color: 0x808080 });
-            block = new THREE.Mesh(geometry, material);
-            break;
-        default:
-            return null;
-    }
+// Cache geometry and materials
+const blockGeometry = new THREE.BoxGeometry(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+const blockMaterials = {
+    [BLOCK_TYPES.GRASS]: new THREE.MeshBasicMaterial({ color: 0x3bba1f }),
+    [BLOCK_TYPES.DIRT]: new THREE.MeshBasicMaterial({ color: 0x8B4513 }),
+    [BLOCK_TYPES.STONE]: new THREE.MeshBasicMaterial({ color: 0x808080 })
+};
 
+// Update createBlock to use cached geometry and materials
+function createBlock(type, x, y, z) {
+    if (!blockMaterials[type]) return null;
+    const block = new THREE.Mesh(blockGeometry, blockMaterials[type]);
     block.position.set(x, y, z);
     return block;
 }
 
-// Add this function to find the surface height at a given x,z coordinate
+// Update getSurfaceHeight to work with chunks
 function getSurfaceHeight(x, z) {
-    for (let y = MAP_SIZE.height - 1; y >= 0; y--) {
-        const key = `${x},${y},${z}`;
-        if (worldData[key]) {
-            return y + 1; // Return one block above the surface
-        }
-    }
-    return BASE_HEIGHT; // Fallback height if no surface found
-}
-
-// Modify the world generation to set player spawn after world is generated
-function generateWorld() {
-    const noise = new SimplexNoise();
+    const { chunkX, chunkZ, localX, localZ } = getChunkCoords(x, z);
+    const chunk = CHUNKS[getChunkKey(chunkX, chunkZ)];
     
-    // Generate terrain
-    for(let x = 0; x < MAP_SIZE.width; x++) {
-        for(let z = 0; z < MAP_SIZE.depth; z++) {
-            const nx = x / NOISE_SCALE;
-            const nz = z / NOISE_SCALE;
-            const height = Math.floor(
-                BASE_HEIGHT + 
-                (noise.noise2D(nx, nz) + 1) * 0.5 * TERRAIN_AMPLITUDE
-            );
-            
-            for(let y = 0; y < height; y++) {
-                let blockType;
-                if (y < height - 4) {
-                    blockType = BLOCK_TYPES.STONE;
-                } else if (y < height - 1) {
-                    blockType = BLOCK_TYPES.DIRT;
-                } else if (y === height - 1) {
-                    blockType = BLOCK_TYPES.GRASS;
-                }
-                
-                if (blockType) {
-                    const block = createBlock(blockType, x, y, z);
-                    if (block) {
-                        scene.add(block);
-                        const key = `${x},${y},${z}`;
-                        worldData[key] = {
-                            type: blockType,
-                            mesh: block
-                        };
-                    }
-                }
-            }
+    if (!chunk) return BASE_HEIGHT;
+    
+    for (let y = MAP_SIZE.height - 1; y >= 0; y--) {
+        const key = `${localX},${y},${localZ}`;
+        if (chunk.blocks[key]) {
+            return y + 1;
         }
     }
-
-    // Set player spawn position
-    const spawnX = Math.floor(MAP_SIZE.width / 2);
-    const spawnZ = Math.floor(MAP_SIZE.depth / 2);
-    const spawnY = getSurfaceHeight(spawnX, spawnZ);
-    camera.position.set(spawnX, spawnY + PLAYER_HEIGHT, spawnZ);
+    return BASE_HEIGHT;
 }
+
+// Add this to track loaded chunks
 
 // Initialize the world
 generateWorld();
