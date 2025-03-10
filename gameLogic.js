@@ -41,47 +41,21 @@ const worldData = {};
 function createBlock(type, x, y, z) {
     const geometry = new THREE.BoxGeometry(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
     
-    // Create different materials based on block type
     let material;
-        let block;
+    let block;
     
     switch(type) {
         case BLOCK_TYPES.GRASS:
             material = new THREE.MeshBasicMaterial({ color: 0x3bba1f });
             block = new THREE.Mesh(geometry, material);
-            
-            // Add outline to grass blocks
-            const edges = new THREE.EdgesGeometry(geometry);
-            const line = new THREE.LineSegments(
-                edges,
-                
-                new THREE.LineBasicMaterial({ color: 0x000000 })
-            );
-            block.add(line);
             break;
         case BLOCK_TYPES.DIRT:
             material = new THREE.MeshBasicMaterial({ color: 0x8B4513 });
             block = new THREE.Mesh(geometry, material);
-            
-            // Add outline to dirt blocks
-            const dirtEdges = new THREE.EdgesGeometry(geometry);
-            const dirtLine = new THREE.LineSegments(
-                dirtEdges,
-                new THREE.LineBasicMaterial({ color: 0x000000 })
-            );
-            block.add(dirtLine);
             break;
         case BLOCK_TYPES.STONE:
             material = new THREE.MeshBasicMaterial({ color: 0x808080 });
             block = new THREE.Mesh(geometry, material);
-            
-            // Add outline to stone blocks
-            const stoneEdges = new THREE.EdgesGeometry(geometry);
-            const stoneLine = new THREE.LineSegments(
-                stoneEdges,
-                new THREE.LineBasicMaterial({ color: 0x000000 })
-            );
-            block.add(stoneLine);
             break;
         default:
             return null;
@@ -131,7 +105,8 @@ generateWorld();
 const GRAVITY = 0.003;
 const JUMP_FORCE = 0.1;
 const PLAYER_HEIGHT = 1.8;  // Minecraft player is ~1.8 blocks tall
-const WALK_SPEED = 0.085;
+const WALK_SPEED = 0.030;
+const SPRINT_SPEED
 
 // Player state
 const player = {
@@ -301,6 +276,44 @@ function getNearbyBlocks(rad){
     return nearbyBlocks;
 }
 
+// Add this variable to track the currently highlighted block
+let highlightedBlock = null;
+
+// Add this function to update the block highlight
+function updateBlockHighlight() {
+    if (!controls.isLocked) return;
+
+    // Remove highlight from previously highlighted block
+    if (highlightedBlock) {
+        highlightedBlock.remove(highlightedBlock.children[0]);
+    }
+
+    // Update the picking ray with the camera and mouse position
+    raycaster.setFromCamera(mouse, camera);
+
+    // Get all nearby blocks for intersection testing
+    const nearbyBlocks = getNearbyBlocks(3);
+    const blockMeshes = nearbyBlocks.map(block => block.mesh);
+    
+    // Calculate intersections with blocks
+    const intersects = raycaster.intersectObjects(blockMeshes);
+
+    if (intersects.length > 0) {
+        const intersectedMesh = intersects[0].object;
+        
+        // Add outline to intersected block
+        const edges = new THREE.EdgesGeometry(intersectedMesh.geometry);
+        const line = new THREE.LineSegments(
+            edges,
+            new THREE.LineBasicMaterial({ color: 0x000000 })
+        );
+        intersectedMesh.add(line);
+        highlightedBlock = intersectedMesh;
+    } else {
+        highlightedBlock = null;
+    }
+}
+
 // Update the animation loop
 function animate() {
     requestAnimationFrame(animate);
@@ -331,6 +344,9 @@ function animate() {
 
     // Check for collisions
     checkCollision();
+
+    // Add this line before renderer.render
+    updateBlockHighlight();
 
     renderer.render(scene, camera);
 }
@@ -375,14 +391,14 @@ document.addEventListener('mousedown', (event) => {
             // Create bounding boxes for collision detection so we dont place the block where player
                 const playerBox = new THREE.Box3().setFromObject(new THREE.Object3D());
                 playerBox.min.set(
-                    camera.position.x - 0.3,  // Player width/2
-                    camera.position.y - PLAYER_HEIGHT,  // Full height from feet
-                    camera.position.z - 0.3
+                    camera.position.x - 0.2,  // Reduced from 0.3
+                    camera.position.y - PLAYER_HEIGHT + 0.1,  // Added small offset from bottom
+                    camera.position.z - 0.2   // Reduced from 0.3
                 );
                 playerBox.max.set(
-                    camera.position.x + 0.3,
-                    camera.position.y,  // Camera position is at eye level
-                    camera.position.z + 0.3
+                    camera.position.x + 0.2,  // Reduced from 0.3
+                    camera.position.y - 0.1,  // Added small offset from top
+                    camera.position.z + 0.2   // Reduced from 0.3
                 );
             // Check if position is valid (within bounds and not occupied)
             if (newX >= 0 && newX < MAP_SIZE.width &&
