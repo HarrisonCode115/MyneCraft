@@ -345,7 +345,7 @@ function unloadChunk(chunkX, chunkZ, chunk) {
     chunk.loaded = false;
 }
 
-// Update getNearbyBlocks to work with chunks
+// Update getNearbyBlocks back to its simpler form
 function getNearbyBlocks(rad) {
     const playerPos = camera.position;
     const nearbyBlocks = [];
@@ -632,6 +632,46 @@ function addToInventory(blockType) {
     updateHotbarUI();
 }
 
+// Add this function to update adjacent blocks' visibility
+function updateAdjacentBlocks(x, y, z) {
+    const positions = [
+        [x + 1, y, z],
+        [x - 1, y, z],
+        [x, y + 1, z],
+        [x, y - 1, z],
+        [x, y, z + 1],
+        [x, y, z - 1]
+    ];
+
+    positions.forEach(([adjX, adjY, adjZ]) => {
+        const { chunkX, chunkZ, localX, localZ } = getChunkCoords(adjX, adjZ);
+        const chunk = CHUNKS[getChunkKey(chunkX, chunkZ)];
+        
+        if (chunk && chunk.loaded) {
+            const key = `${localX},${adjY},${localZ}`;
+            const block = chunk.blocks[key];
+            
+            if (block && block.mesh) {
+                // Remove old mesh
+                scene.remove(block.mesh);
+                block.mesh.geometry.dispose();
+                if (Array.isArray(block.mesh.material)) {
+                    block.mesh.material.forEach(m => m.dispose());
+                } else {
+                    block.mesh.material.dispose();
+                }
+                
+                // Create new mesh with updated visibility
+                const newMesh = createBlock(block.type, block.worldX, block.worldY, block.worldZ);
+                if (newMesh) {
+                    scene.add(newMesh);
+                    block.mesh = newMesh;
+                }
+            }
+        }
+    });
+}
+
 // Modify the block breaking part of the mousedown event handler
 document.addEventListener('mousedown', (event) => {
     if (!controls.isLocked) return;
@@ -658,6 +698,9 @@ document.addEventListener('mousedown', (event) => {
                     
                     scene.remove(chunk.blocks[key].mesh);
                     delete chunk.blocks[key];
+                    
+                    // Update adjacent blocks
+                    updateAdjacentBlocks(pos.x, Math.floor(pos.y), pos.z);
                 }
             }
         } else if (event.button === 2) {  // Right click - place block
@@ -691,6 +734,9 @@ document.addEventListener('mousedown', (event) => {
                                 scene.add(mesh);
                                 block.mesh = mesh;
                                 newChunk.blocks[newKey] = block;
+                                
+                                // Update adjacent blocks
+                                updateAdjacentBlocks(newX, Math.floor(newY), newZ);
                                 
                                 // Decrease the count in inventory
                                 selectedItem.count--;
@@ -727,14 +773,39 @@ const blockMaterials = {
     [BLOCK_TYPES.STONE]: new THREE.MeshBasicMaterial({ color: 0x808080 })
 };
 
-// Update createBlock to handle arrays of materials
+// Update the blockExists function to handle chunk boundaries correctly
+function blockExists(x, y, z) {
+    if (y < 0 || y >= MAP_SIZE.height) return false;
+    
+    const { chunkX, chunkZ, localX, localZ } = getChunkCoords(x, z);
+    const chunk = CHUNKS[getChunkKey(chunkX, chunkZ)];
+    
+    if (!chunk) return false;
+    
+    // Handle negative modulo correctly for local coordinates
+    const correctedLocalX = ((localX % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+    const correctedLocalZ = ((localZ % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+    
+    const key = `${correctedLocalX},${y},${correctedLocalZ}`;
+    return !!chunk.blocks[key];
+}
+
+// Update createBlock function to handle face visibility better
 function createBlock(type, x, y, z) {
     if (!blockMaterials[type]) return null;
     
-    // If the material is an array, use it directly, otherwise create an array of 6 identical materials
+    // Always create new materials to avoid sharing between blocks
     const materials = Array.isArray(blockMaterials[type]) 
-        ? blockMaterials[type] 
-        : Array(6).fill(blockMaterials[type]);
+        ? blockMaterials[type].map(mat => mat.clone()) 
+        : Array(6).fill().map(() => blockMaterials[type].clone());
+    
+    // Check each face and set visibility
+    materials[0].visible = !blockExists(x + 1, y, z); // right
+    materials[1].visible = !blockExists(x - 1, y, z); // left
+    materials[2].visible = !blockExists(x, y + 1, z); // top
+    materials[3].visible = !blockExists(x, y - 1, z); // bottom
+    materials[4].visible = !blockExists(x, y, z + 1); // front
+    materials[5].visible = !blockExists(x, y, z - 1); // back
     
     const block = new THREE.Mesh(blockGeometry, materials);
     block.position.set(x, y, z);
