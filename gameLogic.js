@@ -480,7 +480,159 @@ function wouldIntersectPlayer(x, y, z) {
     return playerBox.intersectsBox(blockBox);
 }
 
-// Add click handler for breaking blocks
+// Add these constants near the top with other constants
+const INVENTORY_SIZE = 9;
+const inventory = Array(INVENTORY_SIZE).fill(null);
+let selectedSlot = 0;
+
+// Add this after your other HTML additions to create the hotbar UI
+const hotbarContainer = document.createElement('div');
+hotbarContainer.style.cssText = `
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 4px;
+    padding: 8px;
+    background: rgba(0, 0, 0, 0.5);
+    border-radius: 8px;
+`;
+document.body.appendChild(hotbarContainer);
+
+// Update the slot creation style and add a selection indicator
+for (let i = 0; i < INVENTORY_SIZE; i++) {
+    const slot = document.createElement('div');
+    slot.id = `slot-${i}`;
+    slot.style.cssText = `
+        width: 50px;
+        height: 50px;
+        background: rgba(255, 255, 255, 0.1);
+        border: 2px solid rgba(255, 255, 255, 0.4);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-family: Arial;
+        position: relative;
+        transition: all 0.1s ease;
+    `;
+    
+    // Add the slot number above each slot
+    const slotNumber = document.createElement('div');
+    slotNumber.style.cssText = `
+        position: absolute;
+        top: -20px;
+        left: 50%;
+        transform: translateX(-50%);
+        color: white;
+        font-size: 14px;
+    `;
+    slotNumber.textContent = (i + 1).toString();
+    slot.appendChild(slotNumber);
+    
+    hotbarContainer.appendChild(slot);
+}
+
+// Update the keyboard controls for slot selection
+document.addEventListener('keydown', (event) => {
+    const num = parseInt(event.key);
+    if (!isNaN(num) && num >= 1 && num <= INVENTORY_SIZE) {
+        selectedSlot = num - 1;
+        updateHotbarUI();
+    }
+});
+
+// Update the hotbar UI
+function updateHotbarUI() {
+    for (let i = 0; i < INVENTORY_SIZE; i++) {
+        const slot = document.getElementById(`slot-${i}`);
+        const item = inventory[i];
+        
+        // Clear the slot
+        slot.innerHTML = '';
+        
+        // Add back the slot number
+        const slotNumber = document.createElement('div');
+        slotNumber.style.cssText = `
+            position: absolute;
+            top: -20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            font-size: 14px;
+        `;
+        slotNumber.textContent = (i + 1).toString();
+        slot.appendChild(slotNumber);
+        
+        // If there's an item in this slot, show it
+        if (item) {
+            const itemDiv = document.createElement('div');
+            itemDiv.style.cssText = `
+                position: relative;
+                width: 40px;
+                height: 40px;
+                background: ${getBlockColor(item.type)};
+            `;
+            
+            const countDiv = document.createElement('div');
+            countDiv.style.cssText = `
+                position: absolute;
+                bottom: -15px;
+                right: -15px;
+                font-size: 14px;
+                color: white;
+                text-shadow: 1px 1px 1px rgba(0,0,0,0.5);
+            `;
+            countDiv.textContent = item.count;
+            
+            itemDiv.appendChild(countDiv);
+            slot.appendChild(itemDiv);
+        }
+        
+        // Update selected slot styling
+        if (i === selectedSlot) {
+            slot.style.border = '2px solid rgba(255, 255, 255, 0.9)';
+            slot.style.background = 'rgba(255, 255, 255, 0.3)';
+            slot.style.boxShadow = '0 0 10px rgba(255, 255, 255, 0.5)';
+        } else {
+            slot.style.border = '2px solid rgba(255, 255, 255, 0.4)';
+            slot.style.background = 'rgba(255, 255, 255, 0.1)';
+            slot.style.boxShadow = 'none';
+        }
+    }
+}
+
+// Helper function to get block colors for inventory display
+function getBlockColor(blockType) {
+    switch (blockType) {
+        case BLOCK_TYPES.GRASS: return '#3bba1f';
+        case BLOCK_TYPES.DIRT: return '#8B4513';
+        case BLOCK_TYPES.STONE: return '#808080';
+        default: return '#ffffff';
+    }
+}
+
+// Add this function to add items to inventory
+function addToInventory(blockType) {
+    // First try to find an existing stack of the same type
+    let existingSlot = inventory.findIndex(item => item && item.type === blockType);
+    
+    if (existingSlot !== -1) {
+        inventory[existingSlot].count++;
+    } else {
+        // Find first empty slot
+        let emptySlot = inventory.findIndex(item => item === null);
+        if (emptySlot !== -1) {
+            inventory[emptySlot] = { type: blockType, count: 1 };
+        }
+        // If no empty slot, item is lost
+    }
+    
+    updateHotbarUI();
+}
+
+// Modify the block breaking part of the mousedown event handler
 document.addEventListener('mousedown', (event) => {
     if (!controls.isLocked) return;
 
@@ -501,6 +653,9 @@ document.addEventListener('mousedown', (event) => {
             if (chunk && chunk.loaded) {
                 const key = `${localX},${Math.floor(pos.y)},${localZ}`;
                 if (chunk.blocks[key]) {
+                    // Add block to inventory before removing it
+                    addToInventory(chunk.blocks[key].type);
+                    
                     scene.remove(chunk.blocks[key].mesh);
                     delete chunk.blocks[key];
                 }
@@ -513,24 +668,37 @@ document.addEventListener('mousedown', (event) => {
             
             // Check if the new block would intersect with the player
             if (!wouldIntersectPlayer(newX, newY, newZ)) {
-                const { chunkX: newChunkX, chunkZ: newChunkZ, localX: newLocalX, localZ: newLocalZ } = getChunkCoords(newX, newZ);
-                const newChunk = CHUNKS[getChunkKey(newChunkX, newChunkZ)];
+                // Get the selected inventory slot
+                const selectedItem = inventory[selectedSlot];
                 
-                if (newChunk && newChunk.loaded) {
-                    const newKey = `${newLocalX},${Math.floor(newY)},${newLocalZ}`;
-                    if (!newChunk.blocks[newKey]) {
-                        const block = {
-                            type: BLOCK_TYPES.DIRT,
-                            worldX: newX,
-                            worldY: Math.floor(newY),
-                            worldZ: newZ
-                        };
-                        
-                        const mesh = createBlock(block.type, block.worldX, block.worldY, block.worldZ);
-                        if (mesh) {
-                            scene.add(mesh);
-                            block.mesh = mesh;
-                            newChunk.blocks[newKey] = block;
+                // Only place if we have blocks of this type
+                if (selectedItem && selectedItem.count > 0) {
+                    const { chunkX: newChunkX, chunkZ: newChunkZ, localX: newLocalX, localZ: newLocalZ } = getChunkCoords(newX, newZ);
+                    const newChunk = CHUNKS[getChunkKey(newChunkX, newChunkZ)];
+                    
+                    if (newChunk && newChunk.loaded) {
+                        const newKey = `${newLocalX},${Math.floor(newY)},${newLocalZ}`;
+                        if (!newChunk.blocks[newKey]) {
+                            const block = {
+                                type: selectedItem.type,  // Use the selected block type
+                                worldX: newX,
+                                worldY: Math.floor(newY),
+                                worldZ: newZ
+                            };
+                            
+                            const mesh = createBlock(block.type, block.worldX, block.worldY, block.worldZ);
+                            if (mesh) {
+                                scene.add(mesh);
+                                block.mesh = mesh;
+                                newChunk.blocks[newKey] = block;
+                                
+                                // Decrease the count in inventory
+                                selectedItem.count--;
+                                if (selectedItem.count === 0) {
+                                    inventory[selectedSlot] = null;
+                                }
+                                updateHotbarUI();
+                            }
                         }
                     }
                 }
@@ -593,4 +761,7 @@ function getSurfaceHeight(x, z) {
 
 // Initialize the world
 generateWorld();
+
+// Initialize the hotbar UI
+updateHotbarUI();
 
